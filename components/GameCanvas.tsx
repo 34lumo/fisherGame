@@ -550,6 +550,14 @@ export default function GameCanvas() {
       tickReeling(now, dt);
       tickCast(now);
 
+      // Keep line origin anchored to the live rod tip every frame
+      if (castRef.current.phase !== "idle") {
+        const tipX = rodX + Math.cos(angle) * rodLen;
+        const tipY = (rodY + bob) + Math.sin(angle) * rodLen;
+        castRef.current.origin  = { x: tipX, y: tipY };
+        castRef.current.control = arcMid({ x: tipX, y: tipY }, castRef.current.target);
+      }
+
       ctx.clearRect(0, 0, W, H);
       drawSky();
       drawOcean();
