@@ -54,7 +54,7 @@ export class FishManager {
     // Start at a random x within bounds, pick a random direction
     const spawnX  = leftBound + Math.random() * Math.max(0, rightBound - leftBound - drawnW);
     const goRight = Math.random() > 0.5;
-    const speed   = 20 + Math.random() * 20; // 20–40 px/s
+    const speed   = 40 + Math.random() * 30; // 40–70 px/s
 
     this.fish = {
       id:    this.nextId++,

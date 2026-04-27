@@ -282,10 +282,11 @@ export default function GameCanvas() {
       ctx.globalAlpha = 1;
     }
 
-    function drawMuchacho() {
+    function drawMuchacho(t: number) {
       const i = mucRef.current;
       if (!i?.complete || !i.naturalWidth) return;
-      ctx.drawImage(i, sprX, sprY, sprW, sprH);
+      const bob = Math.sin(t * 0.9) * 2;
+      ctx.drawImage(i, sprX, sprY + bob, sprW, sprH);
     }
 
     // ── Reeling ───────────────────────────────────────────────────────────
@@ -556,7 +557,7 @@ export default function GameCanvas() {
       if (fish) drawFish(fish, now / 1000);
       drawRod(angle);
       drawCastLine();
-      drawMuchacho();
+      drawMuchacho(now / 1000);
       drawFloatingTexts(now);
       drawScore();
       drawChallengeUI(now);
