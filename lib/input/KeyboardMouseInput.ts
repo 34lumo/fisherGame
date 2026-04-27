@@ -9,6 +9,7 @@ export class KeyboardMouseInput implements GameInput {
 
   private buttonDown = false;
   private prevButtonDown = false;
+  private _pinchStarted = false; // set by mousedown event, consumed once by isPinchStart()
 
   private onMouseMove: (e: MouseEvent) => void;
   private onMouseDown: (e: MouseEvent) => void;
@@ -24,7 +25,7 @@ export class KeyboardMouseInput implements GameInput {
       this.mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
     };
     this.onMouseDown = (e: MouseEvent) => {
-      if (e.button === 0) this.buttonDown = true;
+      if (e.button === 0) { this.buttonDown = true; this._pinchStarted = true; }
     };
     this.onMouseUp = (e: MouseEvent) => {
       if (e.button === 0) this.buttonDown = false;
@@ -52,7 +53,8 @@ export class KeyboardMouseInput implements GameInput {
   }
 
   isPinchStart(_hand?: "left" | "right"): boolean {
-    return this.buttonDown && !this.prevButtonDown;
+    if (this._pinchStarted) { this._pinchStarted = false; return true; }
+    return false;
   }
 
   isPinchEnd(_hand?: "left" | "right"): boolean {
