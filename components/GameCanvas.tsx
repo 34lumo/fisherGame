@@ -5,9 +5,9 @@ import { KeyboardMouseInput } from "@/lib/input/KeyboardMouseInput";
 import { FishManager, type Fish } from "@/lib/game/FishManager";
 
 // h/w ratios for each source PNG
-const MUC_HW = 376 / 856;   // muchacho  856×376
-const IZQ_WH = 802 / 1696;  // ladoIzq   802×1696  (w per unit of h)
-const DER_WH = 642 / 1696;  // ladoder   642×1696
+const MUC_HW = 376 / 856;
+const IZQ_WH = 802 / 1696;
+const DER_WH = 642 / 1696;
 
 const CAST_OUT_S  = 0.45;
 const CAST_HOLD_S = 0.50;
@@ -22,6 +22,23 @@ interface Cast {
   hookedFishId?: number;
 }
 
+type ChallengeType = "TYPE_NUMBER" | "HOLD_KEY" | "MASH_KEY";
+interface ReelingState {
+  active: boolean;
+  fishId: number;
+  fishStartX: number; fishStartY: number;
+  challengeDone: number;
+  currentChallenge: ChallengeType;
+  challengeStart: number;
+  targetDigit: number;
+  holdAccum: number;
+  mashCount: number;
+  lerpFromX: number;   lerpFromY: number;
+  lerpTargetX: number; lerpTargetY: number;
+  lerpStartTime: number;
+}
+interface FloatingText { text: string; x: number; y: number; startTime: number; }
+
 // Wave positions as fractions: [x/W, (y − horizonY) / oceanH, len/W]
 const WAVES = [
   [0.094, 0.086, 0.015], [0.615, 0.105, 0.010], [0.865, 0.094, 0.017],
@@ -29,6 +46,8 @@ const WAVES = [
   [0.135, 0.512, 0.023], [0.510, 0.492, 0.019],
   [0.323, 0.727, 0.027], [0.677, 0.703, 0.023], [0.875, 0.746, 0.021],
 ] as const;
+
+const CHALLENGE_TYPES: ChallengeType[] = ["TYPE_NUMBER", "HOLD_KEY", "MASH_KEY"];
 
 function quadBez(t: number, P0: Pt, P1: Pt, P2: Pt): Pt {
   const m = 1 - t;
@@ -41,51 +60,55 @@ function arcMid(o: Pt, t: Pt): Pt {
 }
 
 export default function GameCanvas() {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const inputRef  = useRef<KeyboardMouseInput | null>(null);
-  const rafRef    = useRef<number>(0);
-  const mucRef    = useRef<HTMLImageElement | null>(null);
-  const izqRef    = useRef<HTMLImageElement | null>(null);
-  const derRef    = useRef<HTMLImageElement | null>(null);
-  const castRef    = useRef<Cast>({
+  const canvasRef    = useRef<HTMLCanvasElement>(null);
+  const inputRef     = useRef<KeyboardMouseInput | null>(null);
+  const rafRef       = useRef<number>(0);
+  const mucRef       = useRef<HTMLImageElement | null>(null);
+  const izqRef       = useRef<HTMLImageElement | null>(null);
+  const derRef       = useRef<HTMLImageElement | null>(null);
+  const castRef      = useRef<Cast>({
     phase: "idle", origin: {x:0,y:0}, target: {x:0,y:0},
     control: {x:0,y:0}, progress: 0, phaseStart: 0,
   });
-  const fishMgrRef = useRef<FishManager>(new FishManager());
+  const fishMgrRef       = useRef<FishManager>(new FishManager());
+  const reelingRef       = useRef<ReelingState>({
+    active: false, fishId: -1,
+    fishStartX: 0, fishStartY: 0,
+    challengeDone: 0, currentChallenge: "TYPE_NUMBER",
+    challengeStart: 0, targetDigit: 1,
+    holdAccum: 0, mashCount: 0,
+    lerpFromX: 0, lerpFromY: 0,
+    lerpTargetX: 0, lerpTargetY: 0,
+    lerpStartTime: 0,
+  });
+  const scoreRef         = useRef<number>(0);
+  const floatingTextsRef = useRef<FloatingText[]>([]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d")!;
 
-    // Load sprites once
     const muc = new Image(); muc.src = "/muchacho.png"; mucRef.current = muc;
     const izq = new Image(); izq.src = "/ladoIzq.png";  izqRef.current = izq;
     const der = new Image(); der.src = "/ladoder.png";   derRef.current = der;
 
-    // ── Layout (recomputed on resize) ──────────────────────────────────────
+    // ── Layout ────────────────────────────────────────────────────────────
     let W = 0, H = 0, hz = 0;
     let sprW = 0, sprH = 0, sprX = 0, sprY = 0;
     let rodX = 0, rodY = 0, rodLen = 0;
-    let dbX = 0, dbY = 0;
+    let dbX  = 0, dbY  = 0;
 
     function applyLayout() {
-      W = canvas!.width;
-      H = canvas!.height;
+      W = canvas!.width;  H = canvas!.height;
       hz = Math.round(H * 0.20);
-
-      // muchacho: 25% canvas width, bottom-center
       sprW = Math.round(W * 0.25);
       sprH = Math.round(sprW * MUC_HW);
       sprX = Math.round((W - sprW) / 2);
       sprY = H - sprH;
-
-      // rod anchors: center-x, ~38% down from sprite top
       rodLen = Math.round(sprW * 0.22);
       rodX   = Math.round(W / 2);
       rodY   = Math.round(sprY + sprH * 0.38);
-
-      // distant boat: top-right, just below horizon
       dbX = Math.round(W * 0.87);
       dbY = Math.round(hz + H * 0.02);
     }
@@ -94,7 +117,6 @@ export default function GameCanvas() {
       canvas!.width  = window.innerWidth;
       canvas!.height = window.innerHeight;
       applyLayout();
-      // Recreate input so normalized coords stay accurate
       inputRef.current?.dispose();
       inputRef.current = new KeyboardMouseInput(canvas!);
     }
@@ -102,7 +124,7 @@ export default function GameCanvas() {
     resize();
     window.addEventListener("resize", resize);
 
-    // ── Sky ────────────────────────────────────────────────────────────────
+    // ── Draw helpers ──────────────────────────────────────────────────────
     function drawSky() {
       const g = ctx.createLinearGradient(0, 0, 0, hz);
       g.addColorStop(0,    "#87ceeb");
@@ -112,7 +134,6 @@ export default function GameCanvas() {
       ctx.fillRect(0, 0, W, hz);
     }
 
-    // ── Ocean + waves ──────────────────────────────────────────────────────
     function drawOcean() {
       ctx.fillStyle = "#1a6b8a";
       ctx.fillRect(0, hz, W, H - hz);
@@ -128,7 +149,6 @@ export default function GameCanvas() {
       ctx.globalAlpha = 1;
     }
 
-    // ── Side sprites ───────────────────────────────────────────────────────
     function drawSides() {
       const oy = Math.round(H * 0.02);
       const dh = Math.round(H * 1.10);
@@ -144,7 +164,6 @@ export default function GameCanvas() {
       }
     }
 
-    // ── Distant boat (pixel grid, scales with H) ───────────────────────────
     function drawDistantBoat(t: number) {
       const ps = Math.max(2, Math.round(H / 110));
       const by = Math.round(dbY + Math.sin(t * 0.65) * 1.5);
@@ -159,7 +178,6 @@ export default function GameCanvas() {
         }
     }
 
-    // ── Fishing rod ────────────────────────────────────────────────────────
     function drawRod(angle: number) {
       ctx.save();
       ctx.translate(rodX, rodY);
@@ -183,7 +201,6 @@ export default function GameCanvas() {
       }
     }
 
-    // ── Cast state machine ─────────────────────────────────────────────────
     function tickCast(now: number) {
       const c = castRef.current;
       if (c.phase === "idle") return;
@@ -199,7 +216,6 @@ export default function GameCanvas() {
       }
     }
 
-    // ── Cast line + bobber ─────────────────────────────────────────────────
     function drawCastLine() {
       const c = castRef.current;
       if (c.phase === "idle") return;
@@ -222,7 +238,6 @@ export default function GameCanvas() {
       ctx.fillRect(bx - 1, by,     1, 6); ctx.fillRect(bx + 6, by,     1, 6);
     }
 
-    // ── Fish ──────────────────────────────────────────────────────────────
     function drawFish(fish: Fish, t: number) {
       const oceanH = H - hz;
       const minY   = hz + oceanH * 0.10;
@@ -231,32 +246,29 @@ export default function GameCanvas() {
       const alpha  = 0.70 + depthT * 0.30;
       const wiggle = Math.sin(t * 8 + fish.id) * 2;
 
-      const fw  = Math.round(fish.size * 2);           // drawn width  24-52 px
-      const fh  = Math.round(fish.size * 0.65);        // drawn height
+      const fw  = Math.round(fish.size * 2);
+      const fh  = Math.round(fish.size * 0.65);
       const fx  = Math.round(fish.x);
       const fy  = Math.round(fish.y + wiggle);
-      const ind = Math.max(2, Math.round(fw * 0.12));  // row indent
-      const r1  = Math.max(1, Math.round(fh * 0.28));  // top row h
-      const r2  = Math.max(1, Math.round(fh * 0.44));  // mid row h
-      const r3  = Math.max(1, fh - r1 - r2);           // bot row h
+      const ind = Math.max(2, Math.round(fw * 0.12));
+      const r1  = Math.max(1, Math.round(fh * 0.28));
+      const r2  = Math.max(1, Math.round(fh * 0.44));
+      const r3  = Math.max(1, fh - r1 - r2);
 
       ctx.globalAlpha = alpha;
 
-      // Outline
       ctx.fillStyle = "#c45a00";
-      ctx.fillRect(fx + ind - 1, fy - 1,       fw - (ind - 1) * 2, 1);  // top
-      ctx.fillRect(fx + ind - 1, fy + fh,      fw - (ind - 1) * 2, 1);  // bottom
-      ctx.fillRect(fx - 1,       fy + r1,      1, r2);                   // left
-      ctx.fillRect(fx + fw,      fy + r1,      1, r2);                   // right
+      ctx.fillRect(fx + ind - 1, fy - 1,       fw - (ind - 1) * 2, 1);
+      ctx.fillRect(fx + ind - 1, fy + fh,      fw - (ind - 1) * 2, 1);
+      ctx.fillRect(fx - 1,       fy + r1,      1, r2);
+      ctx.fillRect(fx + fw,      fy + r1,      1, r2);
 
-      // Body — 3 stacked rects (top/bottom narrower = rounded silhouette)
       ctx.fillStyle = "#c45a00";
-      ctx.fillRect(fx + ind, fy,           fw - ind * 2, r1); // top row (dark)
+      ctx.fillRect(fx + ind, fy,           fw - ind * 2, r1);
       ctx.fillStyle = "#ff8c42";
-      ctx.fillRect(fx,       fy + r1,      fw,           r2); // mid row (full)
-      ctx.fillRect(fx + ind, fy + r1 + r2, fw - ind * 2, r3); // bot row
+      ctx.fillRect(fx,       fy + r1,      fw,           r2);
+      ctx.fillRect(fx + ind, fy + r1 + r2, fw - ind * 2, r3);
 
-      // Belly highlight
       ctx.fillStyle = "#ffb347";
       ctx.fillRect(
         fx + Math.round(fw * 0.15),
@@ -265,40 +277,208 @@ export default function GameCanvas() {
         Math.max(1, Math.round(r2 * 0.32))
       );
 
-      // Tail — two V fins right of body
       const tw = Math.max(3, Math.round(fw * 0.22));
       const th = Math.max(2, Math.round(fh * 0.32));
       ctx.fillStyle = "#e06820";
       ctx.fillRect(fx + fw, fy,           tw, th);
       ctx.fillRect(fx + fw, fy + fh - th, tw, th);
 
-      // Eye — 2×2 white, 1×1 black pupil
       const ex = fx + Math.max(2, Math.round(fw * 0.10));
       const ey = fy + r1 + Math.max(1, Math.round(r2 * 0.15));
       ctx.fillStyle = "#ffffff"; ctx.fillRect(ex, ey, 2, 2);
       ctx.fillStyle = "#1a1a1a"; ctx.fillRect(ex, ey, 1, 1);
 
-      // Mouth — 2px dark line front-left
       ctx.fillStyle = "#c45a00";
       ctx.fillRect(fx, fy + r1 + Math.round(r2 * 0.65), 2, 1);
 
       ctx.globalAlpha = 1;
-
-      // HOOKED! label
-      if (fish.state === "hooked") {
-        ctx.font = '16px "Press Start 2P", monospace';
-        ctx.textAlign = "center";
-        ctx.fillStyle = "#ffeb3b";
-        ctx.fillText("HOOKED!", Math.round(fx + fw / 2), fy - 8);
-        ctx.textAlign = "left";
-      }
     }
 
-    // ── Muchacho ───────────────────────────────────────────────────────────
     function drawMuchacho() {
       const i = mucRef.current;
       if (!i?.complete || !i.naturalWidth) return;
       ctx.drawImage(i, sprX, sprY, sprW, sprH);
+    }
+
+    // ── Reeling ───────────────────────────────────────────────────────────
+    function pickChallenge(): ChallengeType {
+      return CHALLENGE_TYPES[Math.floor(Math.random() * 3)];
+    }
+
+    function startChallenge(r: ReelingState, now: number): void {
+      r.currentChallenge = pickChallenge();
+      r.challengeStart   = now;
+      r.targetDigit      = 1 + Math.floor(Math.random() * 5);
+      r.holdAccum        = 0;
+      r.mashCount        = 0;
+    }
+
+    function startReeling(fish: Fish, now: number): void {
+      const r        = reelingRef.current;
+      r.active       = true;
+      r.fishId       = fish.id;
+      r.fishStartX   = fish.x;
+      r.fishStartY   = fish.y;
+      r.challengeDone = 0;
+      r.lerpFromX    = fish.x;
+      r.lerpFromY    = fish.y;
+      r.lerpTargetX  = fish.x;
+      r.lerpTargetY  = fish.y;
+      r.lerpStartTime = 0; // sentinel → lerpT = 1 immediately (no initial lerp)
+      startChallenge(r, now);
+    }
+
+    function tickReeling(now: number, dt: number): void {
+      const r = reelingRef.current;
+      if (!r.active) return;
+      const inp = inputRef.current;
+      if (!inp) return;
+
+      const fish = fishMgrRef.current.getFish();
+      if (!fish || fish.id !== r.fishId) { r.active = false; return; }
+
+      // Lerp fish toward current target position
+      const lerpT = r.lerpStartTime === 0
+        ? 1
+        : Math.min(1, (now - r.lerpStartTime) / 500);
+      fish.x = r.lerpFromX + (r.lerpTargetX - r.lerpFromX) * lerpT;
+      fish.y = r.lerpFromY + (r.lerpTargetY - r.lerpFromY) * lerpT;
+
+      // Freeze cast line at fish
+      const fishCX = fish.x + fish.size;
+      const fishCY = fish.y + fish.size * 0.325;
+      castRef.current.phase      = "hold";
+      castRef.current.phaseStart = now; // reset to prevent auto-retract
+      castRef.current.target     = { x: fishCX, y: fishCY };
+
+      // Timeout → fish escapes
+      if ((now - r.challengeStart) / 1000 >= 6) {
+        fishMgrRef.current.catchFish(fish.id);
+        r.active = false;
+        castRef.current.phase      = "in";
+        castRef.current.phaseStart = now;
+        return;
+      }
+
+      // Challenge input
+      let done = false;
+      if (r.currentChallenge === "TYPE_NUMBER") {
+        done = inp.consumeKeyPresses(`Digit${r.targetDigit}`) > 0;
+      } else if (r.currentChallenge === "HOLD_KEY") {
+        if (inp.isKeyDown("Space")) {
+          r.holdAccum += dt;
+          if (r.holdAccum >= 2) done = true;
+        } else {
+          r.holdAccum = 0;
+        }
+      } else {
+        r.mashCount += inp.consumeKeyPresses("KeyF");
+        if (r.mashCount >= 8) done = true;
+      }
+
+      if (!done) return;
+
+      r.challengeDone++;
+      r.lerpFromX    = fish.x;
+      r.lerpFromY    = fish.y;
+      r.lerpTargetX  = r.fishStartX + (rodX - r.fishStartX) * (r.challengeDone / 3);
+      r.lerpTargetY  = r.fishStartY + (rodY - r.fishStartY) * (r.challengeDone / 3);
+      r.lerpStartTime = now;
+
+      if (r.challengeDone >= 3) {
+        scoreRef.current += 100;
+        floatingTextsRef.current.push({
+          text: "+100", x: fish.x + fish.size, y: fish.y - 20, startTime: now,
+        });
+        fishMgrRef.current.catchFish(fish.id);
+        r.active = false;
+        castRef.current.phase      = "in";
+        castRef.current.phaseStart = now;
+        return;
+      }
+
+      startChallenge(r, now);
+    }
+
+    function drawChallengeUI(now: number): void {
+      const r = reelingRef.current;
+      if (!r.active) return;
+
+      const timeLeft = Math.max(0, 6 - (now - r.challengeStart) / 1000);
+
+      // Timeout bar
+      ctx.fillStyle = "#1a1a1a";
+      ctx.fillRect(0, 0, W, 6);
+      ctx.fillStyle = "#e63946";
+      ctx.fillRect(0, 0, Math.round(W * (timeLeft / 6)), 6);
+
+      // Instruction text
+      let line = "";
+      if      (r.currentChallenge === "TYPE_NUMBER") line = `PRESS  ${r.targetDigit} !`;
+      else if (r.currentChallenge === "HOLD_KEY")    line = "HOLD SPACE 2s!";
+      else                                            line = "MASH F  x8!";
+
+      ctx.font = '20px "Press Start 2P", monospace';
+      ctx.textAlign = "center";
+      ctx.fillStyle = "#000000";
+      ctx.fillText(line, W / 2 + 2, 62);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(line, W / 2, 60);
+
+      // Sub-UI
+      if (r.currentChallenge === "HOLD_KEY") {
+        const bw = 320, bh = 14, bx = Math.round(W / 2 - 160), by = 70;
+        ctx.fillStyle = "#333333";
+        ctx.fillRect(bx, by, bw, bh);
+        ctx.fillStyle = "#4caf50";
+        ctx.fillRect(bx, by, Math.round(bw * Math.min(1, r.holdAccum / 2)), bh);
+        ctx.strokeStyle = "#aaaaaa"; ctx.lineWidth = 1;
+        ctx.strokeRect(bx, by, bw, bh);
+      } else if (r.currentChallenge === "MASH_KEY") {
+        ctx.font = '14px "Press Start 2P", monospace';
+        ctx.fillStyle = "#000000";
+        ctx.fillText(`F  x${r.mashCount} / 8`, W / 2 + 2, 86);
+        ctx.fillStyle = "#ffeb3b";
+        ctx.fillText(`F  x${r.mashCount} / 8`, W / 2, 84);
+      }
+
+      // Progress pips
+      ctx.font = '12px "Press Start 2P", monospace';
+      for (let i = 0; i < 3; i++) {
+        ctx.fillStyle = i < r.challengeDone ? "#4caf50" : "#555555";
+        ctx.fillText("■", W / 2 + (i - 1) * 20 - 5, 108);
+      }
+
+      ctx.textAlign = "left";
+    }
+
+    function drawScore(): void {
+      ctx.font = '14px "Press Start 2P", monospace';
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#000000";
+      ctx.fillText(`SCORE: ${scoreRef.current}`, 22, 32);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(`SCORE: ${scoreRef.current}`, 20, 30);
+    }
+
+    function drawFloatingTexts(now: number): void {
+      const DURATION = 1500;
+      floatingTextsRef.current = floatingTextsRef.current.filter(
+        ft => now - ft.startTime < DURATION
+      );
+      for (const ft of floatingTextsRef.current) {
+        const t  = (now - ft.startTime) / DURATION;
+        const fy = ft.y - t * 60;
+        ctx.globalAlpha = 1 - t;
+        ctx.font = '20px "Press Start 2P", monospace';
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#000000";
+        ctx.fillText(ft.text, ft.x + 2, fy + 2);
+        ctx.fillStyle = "#ffeb3b";
+        ctx.fillText(ft.text, ft.x, fy);
+        ctx.textAlign = "left";
+      }
+      ctx.globalAlpha = 1;
     }
 
     // ── Main loop ──────────────────────────────────────────────────────────
@@ -318,55 +498,66 @@ export default function GameCanvas() {
       const my    = pos.y * H;
       const angle = Math.atan2(my - rodY, mx - rodX);
 
-      // Fish logic — must run before click check so fish ref is available
       const leftBound  = Math.ceil(IZQ_WH * H * 0.72);
       const rightBound = W - Math.ceil(DER_WH * H * 0.72);
       fishMgrRef.current.update(dt, W, H, hz, leftBound, rightBound);
       const fish = fishMgrRef.current.getFish();
 
-      // On click: first try direct fish hook, then cast if no fish nearby
-      if (inp.isPinchStart()) {
-        let directHooked = false;
-        if (fish?.state === "swimming") {
-          const fishCX = fish.x + fish.size;
-          const fishCY = fish.y + fish.size * 0.325;
-          const dist   = Math.hypot(mx - fishCX, my - fishCY);
-          if (dist < fish.size * 2) {
-            fishMgrRef.current.hookFish(fish.id);
-            console.log("FISH HOOKED at distance", dist);
-            directHooked = true;
+      // Hook detection — only when not already reeling
+      if (!reelingRef.current.active) {
+        if (inp.isPinchStart()) {
+          let hooked = false;
+          if (fish?.state === "swimming") {
+            const fishCX = fish.x + fish.size;
+            const fishCY = fish.y + fish.size * 0.325;
+            if (Math.hypot(mx - fishCX, my - fishCY) < fish.size * 2) {
+              fishMgrRef.current.hookFish(fish.id);
+              const ang    = Math.atan2(fishCY - rodY, fishCX - rodX);
+              const origin: Pt = {
+                x: rodX + Math.cos(ang) * rodLen,
+                y: rodY + Math.sin(ang) * rodLen,
+              };
+              castRef.current = {
+                phase: "hold", origin,
+                target:  { x: fishCX, y: fishCY },
+                control: arcMid(origin, { x: fishCX, y: fishCY }),
+                progress: 1.0, phaseStart: now,
+                hookedFishId: fish.id,
+              };
+              startReeling(fish, now);
+              hooked = true;
+            }
+          }
+          if (!hooked && castRef.current.phase === "idle") {
+            const origin: Pt = {
+              x: rodX + Math.cos(angle) * rodLen,
+              y: rodY + Math.sin(angle) * rodLen,
+            };
+            castRef.current = {
+              phase: "out", origin,
+              target:  { x: mx, y: my },
+              control: arcMid(origin, { x: mx, y: my }),
+              progress: 0, phaseStart: now,
+            };
           }
         }
-        if (!directHooked && castRef.current.phase === "idle") {
-          const origin: Pt = {
-            x: rodX + Math.cos(angle) * rodLen,
-            y: rodY + Math.sin(angle) * rodLen,
-          };
-          castRef.current = {
-            phase: "out", origin,
-            target: { x: mx, y: my },
-            control: arcMid(origin, { x: mx, y: my }),
-            progress: 0, phaseStart: now,
-          };
-          console.log("CAST TRIGGERED");
+
+        // Bobber collision during hold
+        const c = castRef.current;
+        if (c.phase === "hold" && c.hookedFishId === undefined && fish?.state === "swimming") {
+          const tip    = quadBez(1.0, c.origin, c.control, c.target);
+          const fishCX = fish.x + fish.size;
+          const fishCY = fish.y + fish.size * 0.325;
+          if (Math.hypot(tip.x - fishCX, tip.y - fishCY) < fish.size * 1.5) {
+            fishMgrRef.current.hookFish(fish.id);
+            c.hookedFishId = fish.id;
+            c.target       = { x: fishCX, y: fishCY };
+            startReeling(fish, now);
+          }
         }
       }
 
-      // Passive bobber collision during hold
-      const c = castRef.current;
-      if (c.phase === "hold" && c.hookedFishId === undefined && fish?.state === "swimming") {
-        const tip    = quadBez(1.0, c.origin, c.control, c.target);
-        const fishCX = fish.x + fish.size;
-        const fishCY = fish.y + fish.size * 0.325;
-        const dist   = Math.hypot(tip.x - fishCX, tip.y - fishCY);
-        if (dist < fish.size * 1.5) {
-          fishMgrRef.current.hookFish(fish.id);
-          c.hookedFishId = fish.id;
-          c.target       = { x: fishCX, y: fishCY };
-          console.log("FISH HOOKED at distance", dist);
-        }
-      }
-
+      tickReeling(now, dt);
       tickCast(now);
 
       ctx.clearRect(0, 0, W, H);
@@ -378,6 +569,9 @@ export default function GameCanvas() {
       drawRod(angle);
       drawCastLine();
       drawMuchacho();
+      drawFloatingTexts(now);
+      drawScore();
+      drawChallengeUI(now);
 
       rafRef.current = requestAnimationFrame(frame);
     }
