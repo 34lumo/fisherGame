@@ -70,7 +70,8 @@ export default function GameCanvas() {
   const izqRef       = useRef<HTMLImageElement | null>(null);
   const derRef       = useRef<HTMLImageElement | null>(null);
   const pezRef       = useRef<HTMLImageElement | null>(null);
-  const nubesRef     = useRef<HTMLImageElement | null>(null);
+  const nubesRef        = useRef<HTMLImageElement | null>(null);
+  const barcolejanoRef  = useRef<HTMLImageElement | null>(null);
   const castRef      = useRef<Cast>({
     phase: "idle", origin: {x:0,y:0}, target: {x:0,y:0},
     control: {x:0,y:0}, progress: 0, phaseStart: 0,
@@ -98,13 +99,13 @@ export default function GameCanvas() {
     const izq = new Image(); izq.src = "/ladoIzq.png";  izqRef.current = izq;
     const der = new Image(); der.src = "/ladoder.png";   derRef.current = der;
     const pez   = new Image(); pez.src   = "/pez.png";    pezRef.current   = pez;
-    const nubes = new Image(); nubes.src = "/nubes.png";  nubesRef.current = nubes;
+    const nubes       = new Image(); nubes.src       = "/nubes.png";       nubesRef.current       = nubes;
+    const barcolejano = new Image(); barcolejano.src = "/barcolejano.png"; barcolejanoRef.current = barcolejano;
 
     // ── Layout ────────────────────────────────────────────────────────────
     let W = 0, H = 0, hz = 0;
-    let sprW = 0, sprH = 0, sprX = 0, sprY = 0;
+    let sprW = 0, sprH = 0, sprY = 0;
     let rodX = 0, rodY = 0, rodLen = 0;
-    let dbX  = 0, dbY  = 0;
     let skyCanvas: HTMLCanvasElement | null = null;
     let seaCanvas: HTMLCanvasElement | null = null;
 
@@ -112,6 +113,7 @@ export default function GameCanvas() {
       const skc = document.createElement("canvas");
       skc.width = W; skc.height = hz;
       const skx = skc.getContext("2d")!;
+
       const g = skx.createLinearGradient(0, 0, 0, hz);
       g.addColorStop(0,    "#5c1a6e");
       g.addColorStop(0.30, "#b8365a");
@@ -119,6 +121,61 @@ export default function GameCanvas() {
       g.addColorStop(1,    "#f5c043");
       skx.fillStyle = g;
       skx.fillRect(0, 0, W, hz);
+
+      function hash2(a: number, b: number): number {
+        return Math.abs(Math.sin(a * 127.1 + b * 311.7) * 43758.5453) % 1;
+      }
+
+      function cloudPuff(cx: number, cy: number, r: number, seed: number): void {
+        const n = 5 + Math.floor(hash2(seed, 99) * 4);
+        for (let i = 0; i < n; i++) {
+          const bx = cx + (hash2(seed + i * 7, 1) - 0.5) * r * 2.4;
+          const by = cy + (hash2(seed + i * 3, 2) - 0.55) * r * 0.9;
+          const br = r  * (0.45 + hash2(seed + i * 11, 3) * 0.50);
+          skx.globalAlpha = 0.28;
+          skx.fillStyle   = "#c070a0";
+          skx.beginPath(); skx.arc(bx + br * 0.25, by + br * 0.25, br * 1.05, 0, Math.PI * 2); skx.fill();
+          skx.globalAlpha = 0.60 + hash2(seed + i, 4) * 0.22;
+          skx.fillStyle   = "#fff0e8";
+          skx.beginPath(); skx.arc(bx, by, br, 0, Math.PI * 2); skx.fill();
+          skx.globalAlpha = 0.78;
+          skx.fillStyle   = "#ffffff";
+          skx.beginPath(); skx.arc(bx - br * 0.1, by - br * 0.18, br * 0.42, 0, Math.PI * 2); skx.fill();
+        }
+        skx.globalAlpha = 1;
+      }
+
+      // Scattered background cloud puffs flanking the central logo area
+      const PUFFS: { x: number; y: number; r: number; s: number }[] = [
+        { x: W * 0.07, y: hz * 0.14, r: hz * 0.072, s: 100 },
+        { x: W * 0.17, y: hz * 0.38, r: hz * 0.052, s: 200 },
+        { x: W * 0.09, y: hz * 0.60, r: hz * 0.038, s: 300 },
+        { x: W * 0.26, y: hz * 0.74, r: hz * 0.028, s: 400 },
+        { x: W * 0.81, y: hz * 0.11, r: hz * 0.080, s: 500 },
+        { x: W * 0.89, y: hz * 0.42, r: hz * 0.055, s: 600 },
+        { x: W * 0.74, y: hz * 0.63, r: hz * 0.036, s: 700 },
+        { x: W * 0.93, y: hz * 0.70, r: hz * 0.026, s: 800 },
+      ];
+      for (const { x, y, r, s } of PUFFS) cloudPuff(x, y, r, s);
+
+      // Tiny pixel bird silhouettes in loose V-formations
+      const ps = Math.max(1, Math.round(W / 700));
+      skx.fillStyle = "#2d1044";
+      const FLOCKS: { cx: number; cy: number; n: number }[] = [
+        { cx: W * 0.23, cy: hz * 0.20, n: 5 },
+        { cx: W * 0.69, cy: hz * 0.27, n: 4 },
+      ];
+      for (const { cx, cy, n } of FLOCKS) {
+        for (let i = 0; i < n; i++) {
+          const spread = i - (n - 1) / 2;
+          const bx = Math.round(cx + spread * ps * 9);
+          const by = Math.round(cy + Math.abs(spread) * ps * 3);
+          skx.fillRect(bx - ps * 2, by + ps, ps * 2, ps);
+          skx.fillRect(bx,          by,      1,       1);
+          skx.fillRect(bx + ps,     by + ps, ps * 2,  ps);
+        }
+      }
+
       skyCanvas = skc;
     }
 
@@ -138,8 +195,8 @@ export default function GameCanvas() {
       swx.fillStyle = g;
       swx.fillRect(0, 0, W, H - hz);
 
-      const COOL: string[] = ["#5db1e5", "#3a8fc1", "#4fa8d8", "#226090", "#2d7ab5"];
-      const WARM: string[] = ["#c87040", "#d4885a", "#e09060", "#b87856", "#c8a878"];
+      const COOL: string[] = ["#5db1e5", "#3a8fc1", "#4fa8d8", "#226090", "#2d7ab5", "#72c4f0"];
+      const WARM: string[] = ["#c87040", "#d4885a", "#e09060", "#c84880", "#d45878", "#e87848"];
       const SHAPES: number[][][] = [
         [[0,1,1,0,0],[1,1,0,0,0]],
         [[0,0,1,1,0],[0,1,1,0,0]],
@@ -147,9 +204,10 @@ export default function GameCanvas() {
         [[0,1,0,0,0],[1,1,1,0,0]],
         [[1,1,0,0,0],[0,0,0,0,0]],
         [[1,1,1,1,0],[0,0,1,1,0]],
+        [[0,1,1,1,0],[1,1,0,0,0]],
       ];
 
-      const NUM_BANDS = 24;
+      const NUM_BANDS = 36;
       const oH = H - hz;
 
       for (let band = 0; band < NUM_BANDS; band++) {
@@ -157,16 +215,18 @@ export default function GameCanvas() {
         const y    = Math.round(t * t * oH * 0.95);
         const ps   = Math.max(1, Math.round(1 + t * 3));
 
-        const warmChance  = (1 - t) * 0.45 + 0.05;
-        const baseSpacing = Math.round(W / (10 + Math.floor(hash2(band, 0) * 6)));
+        const bandWarm    = (1 - t) * 0.55 + 0.05;
+        const baseSpacing = Math.round(W / (14 + Math.floor(hash2(band, 0) * 8)));
         let x = Math.round(hash2(band, 1) * baseSpacing);
 
         while (x < W) {
-          const isWarm = hash2(x * 0.01 + band * 0.3, band * 0.7) < warmChance;
-          const pal    = isWarm ? WARM : COOL;
-          const cIdx   = Math.floor(hash2(x * 0.05 + band, band * 2) * pal.length);
-          const sIdx   = Math.floor(hash2(band * 3 + x * 0.07, x * 0.02 + band * 5) * SHAPES.length);
-          const shape  = SHAPES[sIdx];
+          const centerProx = Math.max(0, 1 - Math.abs(x / W - 0.5) * 2.5);
+          const warmChance = bandWarm + centerProx * 0.20;
+          const isWarm     = hash2(x * 0.01 + band * 0.3, band * 0.7) < warmChance;
+          const pal        = isWarm ? WARM : COOL;
+          const cIdx       = Math.floor(hash2(x * 0.05 + band, band * 2) * pal.length);
+          const sIdx       = Math.floor(hash2(band * 3 + x * 0.07, x * 0.02 + band * 5) * SHAPES.length);
+          const shape      = SHAPES[sIdx];
 
           swx.fillStyle = pal[cIdx];
           for (let row = 0; row < shape.length; row++) {
@@ -180,21 +240,32 @@ export default function GameCanvas() {
         }
       }
 
+      // Floating debris — pebbles, moss, twigs
+      const DEBRIS: string[] = ["#4a3010", "#3a5a20", "#8a7040", "#5a4a28", "#2a4018", "#6a5a38"];
+      for (let i = 0; i < 14; i++) {
+        const dx = Math.round(hash2(i * 17 + 1000, 1) * W);
+        const dy = Math.round(hash2(i * 13 + 1000, 2) * oH * 0.65 + oH * 0.06);
+        const ds = Math.max(2, Math.round(2 + hash2(i * 7  + 1000, 3) * 3));
+        swx.globalAlpha = 0.50 + hash2(i * 5 + 1000, 5) * 0.35;
+        swx.fillStyle   = DEBRIS[Math.floor(hash2(i * 11 + 1000, 4) * DEBRIS.length)];
+        swx.fillRect(dx, dy, ds, Math.max(1, Math.round(ds * 0.55)));
+        if (hash2(i * 23 + 1000, 6) > 0.4)
+          swx.fillRect(dx + Math.round(ds * 0.7), dy - 1, Math.round(ds * 0.8), 1);
+      }
+      swx.globalAlpha = 1;
+
       seaCanvas = swc;
     }
 
     function applyLayout() {
       W = canvas!.width;  H = canvas!.height;
       hz = Math.round(H * 0.20);
-      sprW = Math.round(W * 0.25);
+      sprW = Math.max(160, Math.round(W * 0.33));
       sprH = Math.round(sprW * MUC_HW);
-      sprX = Math.round((W - sprW) / 2);
       sprY = H - sprH;
       rodLen = Math.round(sprW * 0.22);
       rodX   = Math.round(W / 2);
       rodY   = Math.round(sprY + sprH * 0.38);
-      dbX = Math.round(W * 0.87);
-      dbY = Math.round(hz + H * 0.02);
       buildSkyCanvas();
       buildSeaCanvas();
     }
@@ -244,17 +315,14 @@ export default function GameCanvas() {
     }
 
     function drawDistantBoat(t: number) {
-      const ps = Math.max(2, Math.round(H / 110));
-      const by = Math.round(dbY + Math.sin(t * 0.65) * 1.5);
-      const SPR = [[0,0,1,1,1,1,0,0],[0,1,2,3,3,2,1,0],[1,2,3,4,4,3,2,1],
-                   [1,2,2,2,2,2,2,1],[0,0,1,1,1,1,0,0]];
-      const PAL = ["","#5c3208","#a0522d","#c8964a","#3d1a00"];
-      for (let r = 0; r < SPR.length; r++)
-        for (let c = 0; c < SPR[r].length; c++) {
-          const ci = SPR[r][c]; if (!ci) continue;
-          ctx.fillStyle = PAL[ci];
-          ctx.fillRect(dbX + c * ps, by + r * ps, ps, ps);
-        }
+      const img = barcolejanoRef.current;
+      if (!img?.complete || !img.naturalWidth) return;
+      const leftBound = Math.ceil(IZQ_WH * H * 0.72);
+      const bw  = Math.round(W * 0.13);
+      const bh  = Math.round(bw * (img.naturalHeight / img.naturalWidth));
+      const bx  = leftBound + Math.round(W * 0.028);
+      const by  = Math.round(hz + (H - hz) * 0.07 + Math.sin(t * 0.65) * 1.5);
+      ctx.drawImage(img, bx, by, bw, bh);
     }
 
     function drawRod(angle: number, bob: number) {
@@ -354,7 +422,32 @@ export default function GameCanvas() {
     function drawMuchacho(bob: number) {
       const i = mucRef.current;
       if (!i?.complete || !i.naturalWidth) return;
-      ctx.drawImage(i, sprX, sprY + bob, sprW, sprH);
+      const boatWidth  = W * 0.25;
+      const boatHeight = boatWidth * (i.naturalHeight / i.naturalWidth);
+      const boatX      = Math.round((W - boatWidth) / 2);
+      const boatY      = H - boatHeight;
+      ctx.drawImage(i, boatX, boatY + bob, boatWidth, boatHeight);
+    }
+
+    function drawParticles(t: number): void {
+      function hp(a: number, b: number): number {
+        return Math.abs(Math.sin(a * 127.1 + b * 311.7) * 43758.5453) % 1;
+      }
+      for (let i = 0; i < 20; i++) {
+        const spd = 0.6 + hp(i * 11, 3) * 1.6;
+        const pha = hp(i * 7,  4) * Math.PI * 2;
+        const a   = Math.abs(Math.sin(t * spd + pha));
+        if (a < 0.12) continue;
+        const inSky = hp(i * 3, 5) < 0.65;
+        const px = Math.round(hp(i * 37, 1) * W);
+        const py = inSky
+          ? Math.round(hp(i * 17, 2) * hz * 0.92)
+          : Math.round(hz + hp(i * 17, 2) * (H - hz) * 0.22);
+        ctx.globalAlpha = a * 0.60;
+        ctx.fillStyle   = hp(i * 13, 6) < 0.6 ? "#ffc85a" : "#ffe8c0";
+        ctx.fillRect(px, py, 1, 1);
+      }
+      ctx.globalAlpha = 1;
     }
 
     // ── Reeling ───────────────────────────────────────────────────────────
@@ -629,6 +722,7 @@ export default function GameCanvas() {
       ctx.clearRect(0, 0, W, H);
       drawSky();
       drawOcean();
+      drawParticles(now / 1000);
       drawSides();
       drawDistantBoat(now / 1000);
       if (fish) drawFish(fish, now / 1000);
