@@ -51,6 +51,20 @@ interface FloatingText { text: string; x: number; y: number; startTime: number; 
 
 const CHALLENGE_TYPES: ChallengeType[] = ["TYPE_NUMBER", "HOLD_KEY", "MASH_KEY"];
 
+// 5×7 bitmap font for "SteadyArc" cloud text
+// Each row = 5 bits, bit 4 = leftmost column
+const CLOUD_FONT: Record<string, number[]> = {
+  S: [14, 16, 16, 14,  1,  1, 14],
+  t: [ 4,  4, 14,  4,  4,  6,  0],
+  e: [ 0, 14, 17, 31, 16, 17, 14],
+  a: [ 0,  0, 14,  1, 15, 17, 15],
+  d: [ 1,  1, 15, 17, 17, 17, 15],
+  y: [17, 17, 10,  4,  4,  4,  0],
+  A: [ 4, 10, 17, 31, 17, 17, 17],
+  r: [ 0,  0, 10, 12,  8,  8,  8],
+  c: [ 0,  0, 14, 16, 16, 16, 14],
+};
+
 function quadBez(t: number, P0: Pt, P1: Pt, P2: Pt): Pt {
   const m = 1 - t;
   return { x: m*m*P0.x + 2*m*t*P1.x + t*t*P2.x,
@@ -147,12 +161,54 @@ export default function GameCanvas() {
 
     // ── Draw helpers ──────────────────────────────────────────────────────
     function drawSky() {
+      // Warm sunset gradient: deep purple → hot pink → orange → gold
       const g = ctx.createLinearGradient(0, 0, 0, hz);
-      g.addColorStop(0,    "#87ceeb");
-      g.addColorStop(0.55, "#55b8d8");
-      g.addColorStop(1,    "#2b9fc4");
+      g.addColorStop(0,    "#5c1a6e");
+      g.addColorStop(0.30, "#b8365a");
+      g.addColorStop(0.65, "#e0602a");
+      g.addColorStop(1,    "#f5c043");
       ctx.fillStyle = g;
       ctx.fillRect(0, 0, W, hz);
+
+      // ── Cloud text "SteadyArc" ──────────────────────────────────────────
+      const text  = "SteadyArc";
+      const CG    = 1;  // gap between pixels within a character
+      // Size to fill ~85% of screen width and ~65% of sky height
+      const CELL  = Math.max(2, Math.min(
+        Math.floor(W * 0.85 / (text.length * 5.8 + 4)),
+        Math.floor(hz * 0.65 / 8),
+      ));
+      const LSPC  = Math.max(2, Math.round(CELL * 0.55));
+      const charW = 5 * CELL + 4 * CG;
+      const charH = 7 * CELL + 6 * CG;
+      const totalW = text.length * charW + (text.length - 1) * LSPC;
+      const startX = Math.round((W - totalW) / 2);
+      const startY = Math.round((hz - charH) * 0.35);
+
+      for (let ci = 0; ci < text.length; ci++) {
+        const rows = CLOUD_FONT[text[ci]];
+        if (!rows) continue;
+        const ox = startX + ci * (charW + LSPC);
+        for (let row = 0; row < 7; row++) {
+          const bits = rows[row] ?? 0;
+          for (let col = 0; col < 5; col++) {
+            if (!(bits & (1 << (4 - col)))) continue;
+            const px = ox + col * (CELL + CG);
+            const py = startY + row * (CELL + CG);
+            // Warm lavender shadow offset
+            ctx.fillStyle = "#c882b0";
+            ctx.fillRect(px + 1, py + 1, CELL, CELL);
+            // Cloud body — warm white
+            ctx.fillStyle = "#fff4ef";
+            ctx.fillRect(px, py, CELL, CELL);
+            // Bright top highlight strip
+            if (CELL >= 4) {
+              ctx.fillStyle = "#ffffff";
+              ctx.fillRect(px + 1, py, CELL - 2, Math.max(1, Math.round(CELL * 0.38)));
+            }
+          }
+        }
+      }
     }
 
     function drawOcean() {
