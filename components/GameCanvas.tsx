@@ -48,16 +48,6 @@ interface ReelingState {
 }
 interface FloatingText { text: string; x: number; y: number; startTime: number; }
 
-// Pixel-art wave stamp shapes (dx, dy offsets from anchor)
-const WAVE_SHAPES: [number, number][][] = [
-  [[1,0],[2,0],[0,1],[3,1]],                         // arch
-  [[0,0],[3,0],[1,1],[2,1]],                         // inverted arch
-  [[1,0],[2,0],[3,0],[0,1],[4,1]],                   // wide crest
-  [[0,0],[2,0],[1,1],[3,1]],                         // S-step
-  [[1,0],[0,1],[2,1],[1,2]],                         // diamond
-  [[0,0],[1,0],[2,0]],                               // dash
-  [[1,0],[3,0],[0,1],[2,1],[4,1]],                   // chevron
-];
 
 const CHALLENGE_TYPES: ChallengeType[] = ["TYPE_NUMBER", "HOLD_KEY", "MASH_KEY"];
 
@@ -112,94 +102,21 @@ export default function GameCanvas() {
     let sprW = 0, sprH = 0, sprX = 0, sprY = 0;
     let rodX = 0, rodY = 0, rodLen = 0;
     let dbX  = 0, dbY  = 0;
-    let oceanCanvas: HTMLCanvasElement | null = null;
+    let waveLines: { x: number; y: number; len: number }[] = [];
 
-    function buildOceanTexture(): void {
-      const oc  = document.createElement("canvas");
-      oc.width  = W; oc.height = H;
-      const c   = oc.getContext("2d")!;
-      const oH  = H - hz;
-      const LB  = Math.ceil(IZQ_WH * H * 0.72);
-      const RB  = W - Math.ceil(DER_WH * H * 0.72);
-
-      // Base gradient: brighter at horizon → deep at bottom
-      const g = c.createLinearGradient(0, hz, 0, H);
-      g.addColorStop(0,    "#1e95bb");
-      g.addColorStop(0.30, "#1a6b8a");
-      g.addColorStop(1,    "#0b3c57");
-      c.fillStyle = g;
-      c.fillRect(0, hz, W, H - hz);
-
-      // Deterministic hash (sin-based, stable per position)
-      function seaH(x: number, y: number): number {
-        const s = Math.sin(x * 127.1 + y * 311.7) * 43758.5453;
-        return s - Math.floor(s);
-      }
-
-      // Collect rects by color to batch fillStyle changes
-      const buckets = new Map<string, [number, number, number][]>();
-      function dot(col: string, x: number, y: number, ps: number): void {
-        if (y < hz || y + ps > H || x < 0 || x + ps > W) return;
-        let b = buckets.get(col);
-        if (!b) { b = []; buckets.set(col, b); }
-        b.push([x, y, ps]);
-      }
-      function stamp(shape: [number,number][], bx: number, by: number, ps: number, col: string): void {
-        for (const [dx, dy] of shape) dot(col, bx + dx * ps, by + dy * ps, ps);
-      }
-
-      const LIGHT = ["#9cd2ef", "#5ec8e8", "#4ab8d0"];
-      const DARK  = ["#1378b9", "#145578", "#0d3d52"];
-      const FOAM  = ["#9cd2ef", "#5ec8e8", "#3ab0cc"];
-
-      // ── Wave bands (20 rows, quadratic depth spacing for perspective) ───
-      const BANDS = 20;
-      for (let i = 0; i < BANDS; i++) {
-        const t    = i / (BANDS - 1);
-        const d    = t * t;
-        const y    = Math.round(hz + d * oH);
-        const ps   = t < 0.45 ? 1 : 2;
-        const step = Math.max(14, Math.round(36 - t * 20));
-        // Narrow band near horizon (perspective), full width near bottom
-        const xL   = LB + Math.round((1 - t) * 28);
-        const xR   = RB - Math.round((1 - t) * 28);
-
-        for (let x = xL; x < xR; x += step) {
-          const r = seaH(x, y);
-          if (r > 0.52) continue;
-          const shapeIdx = Math.floor(seaH(x + 17, y) * WAVE_SHAPES.length);
-          let col: string;
-          if (t < 0.25) {
-            col = LIGHT[Math.floor(seaH(x, y + 3) * LIGHT.length)];
-          } else if (r < 0.20) {
-            col = DARK[Math.floor(seaH(x + 5, y) * DARK.length)];
-          } else {
-            col = LIGHT[Math.floor(seaH(x + 7, y) * LIGHT.length)];
-          }
-          stamp(WAVE_SHAPES[shapeIdx], x, y, ps, col);
-        }
-      }
-
-      // ── Edge dithering: foam/splash where rocks meet water ─────────────
-      const yStart = hz + Math.round(oH * 0.25);
-      for (let y = yStart; y < H; y += 2) {
-        const frac   = (y - hz) / oH;
-        const spread = Math.round(frac * 18 + 3);
-        for (let d = 0; d < spread; d++) {
-          if (seaH(d * 11, y) > 0.30) continue;
-          const fc = FOAM[Math.floor(seaH(d * 3, y + 1) * FOAM.length)];
-          dot(fc, LB + Math.round(seaH(d * 7,  y)     * spread * 1.8), y, 1);
-          dot(fc, RB - Math.round(seaH(d * 5,  y + 5) * spread * 1.8), y, 1);
-        }
-      }
-
-      // ── Flush buckets → canvas ─────────────────────────────────────────
-      buckets.forEach((pts, col) => {
-        c.fillStyle = col;
-        for (const [x, y, ps] of pts) c.fillRect(x, y, ps, ps);
+    function buildWaveLines(): void {
+      const oH = H - hz;
+      // 15 stable positions derived from index — no grid, no pattern
+      waveLines = Array.from({ length: 15 }, (_, i) => {
+        const h1 = Math.abs(Math.sin(i * 127.1) * 43758.5453) % 1;
+        const h2 = Math.abs(Math.sin(i * 311.7) * 43758.5453) % 1;
+        const h3 = Math.abs(Math.sin(i * 459.3) * 43758.5453) % 1;
+        return {
+          x:   Math.round(W * 0.04 + h1 * W * 0.92),
+          y:   Math.round(hz + h2 * oH),
+          len: Math.round(4 + h3 * 6),
+        };
       });
-
-      oceanCanvas = oc;
     }
 
     function applyLayout() {
@@ -214,7 +131,7 @@ export default function GameCanvas() {
       rodY   = Math.round(sprY + sprH * 0.38);
       dbX = Math.round(W * 0.87);
       dbY = Math.round(hz + H * 0.02);
-      buildOceanTexture();
+      buildWaveLines();
     }
 
     function resize() {
@@ -239,7 +156,10 @@ export default function GameCanvas() {
     }
 
     function drawOcean() {
-      if (oceanCanvas) ctx.drawImage(oceanCanvas, 0, 0);
+      ctx.fillStyle = "#2b82cb";
+      ctx.fillRect(0, hz, W, H - hz);
+      ctx.fillStyle = "#5db1e5";
+      for (const { x, y, len } of waveLines) ctx.fillRect(x, y, len, 1);
     }
 
     function drawSides() {
