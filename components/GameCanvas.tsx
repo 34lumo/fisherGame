@@ -189,9 +189,10 @@ export default function GameCanvas() {
         }
     }
 
-    function drawRod(angle: number) {
+    function drawRod(angle: number, bob: number) {
+      const ry = rodY + bob;
       ctx.save();
-      ctx.translate(rodX, rodY);
+      ctx.translate(rodX, ry);
       ctx.rotate(angle);
       ctx.fillStyle = "#3d1a00"; ctx.fillRect(0, -2, 7, 3);
       ctx.fillStyle = "#7a4e12"; ctx.fillRect(7, -1, Math.round(rodLen * 0.5), 2);
@@ -201,7 +202,7 @@ export default function GameCanvas() {
 
       if (castRef.current.phase === "idle") {
         const tx = rodX + Math.cos(angle) * rodLen;
-        const ty = rodY + Math.sin(angle) * rodLen;
+        const ty = ry  + Math.sin(angle) * rodLen;
         ctx.strokeStyle = "#c8c8c8"; ctx.lineWidth = 1; ctx.globalAlpha = 0.75;
         ctx.beginPath();
         ctx.moveTo(tx, ty);
@@ -282,10 +283,9 @@ export default function GameCanvas() {
       ctx.globalAlpha = 1;
     }
 
-    function drawMuchacho(t: number) {
+    function drawMuchacho(bob: number) {
       const i = mucRef.current;
       if (!i?.complete || !i.naturalWidth) return;
-      const bob = Math.sin(t * 0.9) * 2;
       ctx.drawImage(i, sprX, sprY + bob, sprW, sprH);
     }
 
@@ -482,10 +482,11 @@ export default function GameCanvas() {
       if (!inp) { rafRef.current = requestAnimationFrame(frame); return; }
 
       inp.update();
+      const bob   = Math.sin(Date.now() / 250) * 3;
       const pos   = inp.getHandPosition();
       const mx    = pos.x * W;
       const my    = pos.y * H;
-      const angle = Math.atan2(my - rodY, mx - rodX);
+      const angle = Math.atan2(my - (rodY + bob), mx - rodX);
 
       const leftBound  = Math.ceil(IZQ_WH * H * 0.72);
       const rightBound = W - Math.ceil(DER_WH * H * 0.72);
@@ -501,10 +502,10 @@ export default function GameCanvas() {
             const fishCY = pezCY(fish);
             if (Math.hypot(mx - fishCX, my - fishCY) < 60) {
               fishMgrRef.current.hookFish(fish.id);
-              const ang    = Math.atan2(fishCY - rodY, fishCX - rodX);
+              const ang    = Math.atan2(fishCY - (rodY + bob), fishCX - rodX);
               const origin: Pt = {
                 x: rodX + Math.cos(ang) * rodLen,
-                y: rodY + Math.sin(ang) * rodLen,
+                y: (rodY + bob) + Math.sin(ang) * rodLen,
               };
               castRef.current = {
                 phase: "hold", origin,
@@ -520,7 +521,7 @@ export default function GameCanvas() {
           if (!hooked && castRef.current.phase === "idle") {
             const origin: Pt = {
               x: rodX + Math.cos(angle) * rodLen,
-              y: rodY + Math.sin(angle) * rodLen,
+              y: (rodY + bob) + Math.sin(angle) * rodLen,
             };
             castRef.current = {
               phase: "out", origin,
@@ -555,9 +556,9 @@ export default function GameCanvas() {
       drawSides();
       drawDistantBoat(now / 1000);
       if (fish) drawFish(fish, now / 1000);
-      drawRod(angle);
+      drawRod(angle, bob);
       drawCastLine();
-      drawMuchacho(now / 1000);
+      drawMuchacho(bob);
       drawFloatingTexts(now);
       drawScore();
       drawChallengeUI(now);
