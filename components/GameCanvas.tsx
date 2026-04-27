@@ -9,6 +9,15 @@ const MUC_HW = 376 / 856;
 const IZQ_WH = 802 / 1696;
 const DER_WH = 642 / 1696;
 
+// pez.png sprite dimensions
+const PEZ_HW    = 469 / 642; // height/width of the sprite
+const PEZ_SCALE = 3;         // drawn width = fish.size * PEZ_SCALE
+
+function pezW(size: number) { return size * PEZ_SCALE; }
+function pezH(size: number) { return pezW(size) * PEZ_HW; }
+function pezCX(fish: { x: number; size: number }) { return fish.x + pezW(fish.size) / 2; }
+function pezCY(fish: { y: number; size: number }) { return fish.y + pezH(fish.size) / 2; }
+
 const CAST_OUT_S  = 0.45;
 const CAST_HOLD_S = 0.50;
 const CAST_IN_S   = 0.35;
@@ -66,6 +75,7 @@ export default function GameCanvas() {
   const mucRef       = useRef<HTMLImageElement | null>(null);
   const izqRef       = useRef<HTMLImageElement | null>(null);
   const derRef       = useRef<HTMLImageElement | null>(null);
+  const pezRef       = useRef<HTMLImageElement | null>(null);
   const castRef      = useRef<Cast>({
     phase: "idle", origin: {x:0,y:0}, target: {x:0,y:0},
     control: {x:0,y:0}, progress: 0, phaseStart: 0,
@@ -92,6 +102,7 @@ export default function GameCanvas() {
     const muc = new Image(); muc.src = "/muchacho.png"; mucRef.current = muc;
     const izq = new Image(); izq.src = "/ladoIzq.png";  izqRef.current = izq;
     const der = new Image(); der.src = "/ladoder.png";   derRef.current = der;
+    const pez = new Image(); pez.src = "/pez.png";       pezRef.current = pez;
 
     // ── Layout ────────────────────────────────────────────────────────────
     let W = 0, H = 0, hz = 0;
@@ -239,57 +250,32 @@ export default function GameCanvas() {
     }
 
     function drawFish(fish: Fish, t: number) {
+      const img = pezRef.current;
+      if (!img?.complete || !img.naturalWidth) return;
+
       const oceanH = H - hz;
       const minY   = hz + oceanH * 0.10;
       const maxY   = H * 0.80;
       const depthT = Math.max(0, Math.min(1, (fish.y - minY) / (maxY - minY)));
       const alpha  = 0.70 + depthT * 0.30;
-      const wiggle = Math.sin(t * 8 + fish.id) * 2;
 
-      const fw  = Math.round(fish.size * 2);
-      const fh  = Math.round(fish.size * 0.65);
-      const fx  = Math.round(fish.x);
-      const fy  = Math.round(fish.y + wiggle);
-      const ind = Math.max(2, Math.round(fw * 0.12));
-      const r1  = Math.max(1, Math.round(fh * 0.28));
-      const r2  = Math.max(1, Math.round(fh * 0.44));
-      const r3  = Math.max(1, fh - r1 - r2);
+      const fw = Math.round(pezW(fish.size));
+      const fh = Math.round(pezH(fish.size));
+      const cx = Math.round(fish.x + fw / 2);
+      const cy = Math.round(fish.y + fh / 2);
 
       ctx.globalAlpha = alpha;
 
-      ctx.fillStyle = "#c45a00";
-      ctx.fillRect(fx + ind - 1, fy - 1,       fw - (ind - 1) * 2, 1);
-      ctx.fillRect(fx + ind - 1, fy + fh,      fw - (ind - 1) * 2, 1);
-      ctx.fillRect(fx - 1,       fy + r1,      1, r2);
-      ctx.fillRect(fx + fw,      fy + r1,      1, r2);
-
-      ctx.fillStyle = "#c45a00";
-      ctx.fillRect(fx + ind, fy,           fw - ind * 2, r1);
-      ctx.fillStyle = "#ff8c42";
-      ctx.fillRect(fx,       fy + r1,      fw,           r2);
-      ctx.fillRect(fx + ind, fy + r1 + r2, fw - ind * 2, r3);
-
-      ctx.fillStyle = "#ffb347";
-      ctx.fillRect(
-        fx + Math.round(fw * 0.15),
-        fy + r1 + Math.round(r2 * 0.35),
-        Math.round(fw * 0.55),
-        Math.max(1, Math.round(r2 * 0.32))
-      );
-
-      const tw = Math.max(3, Math.round(fw * 0.22));
-      const th = Math.max(2, Math.round(fh * 0.32));
-      ctx.fillStyle = "#e06820";
-      ctx.fillRect(fx + fw, fy,           tw, th);
-      ctx.fillRect(fx + fw, fy + fh - th, tw, th);
-
-      const ex = fx + Math.max(2, Math.round(fw * 0.10));
-      const ey = fy + r1 + Math.max(1, Math.round(r2 * 0.15));
-      ctx.fillStyle = "#ffffff"; ctx.fillRect(ex, ey, 2, 2);
-      ctx.fillStyle = "#1a1a1a"; ctx.fillRect(ex, ey, 1, 1);
-
-      ctx.fillStyle = "#c45a00";
-      ctx.fillRect(fx, fy + r1 + Math.round(r2 * 0.65), 2, 1);
+      if (fish.state === "hooked") {
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(Math.sin(t * 25) * 0.4);
+        ctx.drawImage(img, -Math.round(fw / 2), -Math.round(fh / 2), fw, fh);
+        ctx.restore();
+      } else {
+        const wiggle = Math.sin(t * 8 + fish.id) * 2;
+        ctx.drawImage(img, Math.round(fish.x), Math.round(fish.y + wiggle), fw, fh);
+      }
 
       ctx.globalAlpha = 1;
     }
@@ -345,8 +331,8 @@ export default function GameCanvas() {
       fish.y = r.lerpFromY + (r.lerpTargetY - r.lerpFromY) * lerpT;
 
       // Freeze cast line at fish
-      const fishCX = fish.x + fish.size;
-      const fishCY = fish.y + fish.size * 0.325;
+      const fishCX = pezCX(fish);
+      const fishCY = pezCY(fish);
       castRef.current.phase      = "hold";
       castRef.current.phaseStart = now; // reset to prevent auto-retract
       castRef.current.target     = { x: fishCX, y: fishCY };
@@ -388,7 +374,7 @@ export default function GameCanvas() {
       if (r.challengeDone >= 3) {
         scoreRef.current += 100;
         floatingTextsRef.current.push({
-          text: "+100", x: fish.x + fish.size, y: fish.y - 20, startTime: now,
+          text: "+100", x: pezCX(fish), y: fish.y - 20, startTime: now,
         });
         fishMgrRef.current.catchFish(fish.id);
         r.active = false;
@@ -508,9 +494,9 @@ export default function GameCanvas() {
         if (inp.isPinchStart()) {
           let hooked = false;
           if (fish?.state === "swimming") {
-            const fishCX = fish.x + fish.size;
-            const fishCY = fish.y + fish.size * 0.325;
-            if (Math.hypot(mx - fishCX, my - fishCY) < fish.size * 2) {
+            const fishCX = pezCX(fish);
+            const fishCY = pezCY(fish);
+            if (Math.hypot(mx - fishCX, my - fishCY) < 60) {
               fishMgrRef.current.hookFish(fish.id);
               const ang    = Math.atan2(fishCY - rodY, fishCX - rodX);
               const origin: Pt = {
@@ -546,9 +532,9 @@ export default function GameCanvas() {
         const c = castRef.current;
         if (c.phase === "hold" && c.hookedFishId === undefined && fish?.state === "swimming") {
           const tip    = quadBez(1.0, c.origin, c.control, c.target);
-          const fishCX = fish.x + fish.size;
-          const fishCY = fish.y + fish.size * 0.325;
-          if (Math.hypot(tip.x - fishCX, tip.y - fishCY) < fish.size * 1.5) {
+          const fishCX = pezCX(fish);
+          const fishCY = pezCY(fish);
+          if (Math.hypot(tip.x - fishCX, tip.y - fishCY) < 60) {
             fishMgrRef.current.hookFish(fish.id);
             c.hookedFishId = fish.id;
             c.target       = { x: fishCX, y: fishCY };

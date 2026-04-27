@@ -26,8 +26,8 @@ export class FishManager {
 
     this.fish.x += this.fish.speed * dt;
 
-    // drawn width = size * 2; despawn when fully past left boundary
-    if (this.fish.x + this.fish.size * 2 < leftBound) {
+    // drawn width = size * 3 (PEZ_SCALE); despawn when fully past left boundary
+    if (this.fish.x + this.fish.size * 3 < leftBound) {
       this.fish = null;
       this.spawnTimer = SPAWN_DELAY;
     }
