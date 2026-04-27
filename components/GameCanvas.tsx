@@ -51,19 +51,6 @@ interface FloatingText { text: string; x: number; y: number; startTime: number; 
 
 const CHALLENGE_TYPES: ChallengeType[] = ["TYPE_NUMBER", "HOLD_KEY", "MASH_KEY"];
 
-// 5×7 bitmap font for "SteadyArc" cloud text
-// Each row = 5 bits, bit 4 = leftmost column
-const CLOUD_FONT: Record<string, number[]> = {
-  S: [14, 16, 16, 14,  1,  1, 14],
-  t: [ 4,  4, 14,  4,  4,  6,  0],
-  e: [ 0, 14, 17, 31, 16, 17, 14],
-  a: [ 0,  0, 14,  1, 15, 17, 15],
-  d: [ 1,  1, 15, 17, 17, 17, 15],
-  y: [17, 17, 10,  4,  4,  4,  0],
-  A: [ 4, 10, 17, 31, 17, 17, 17],
-  r: [ 0,  0, 10, 12,  8,  8,  8],
-  c: [ 0,  0, 14, 16, 16, 16, 14],
-};
 
 function quadBez(t: number, P0: Pt, P1: Pt, P2: Pt): Pt {
   const m = 1 - t;
@@ -83,6 +70,7 @@ export default function GameCanvas() {
   const izqRef       = useRef<HTMLImageElement | null>(null);
   const derRef       = useRef<HTMLImageElement | null>(null);
   const pezRef       = useRef<HTMLImageElement | null>(null);
+  const nubesRef     = useRef<HTMLImageElement | null>(null);
   const castRef      = useRef<Cast>({
     phase: "idle", origin: {x:0,y:0}, target: {x:0,y:0},
     control: {x:0,y:0}, progress: 0, phaseStart: 0,
@@ -109,28 +97,90 @@ export default function GameCanvas() {
     const muc = new Image(); muc.src = "/muchacho.png"; mucRef.current = muc;
     const izq = new Image(); izq.src = "/ladoIzq.png";  izqRef.current = izq;
     const der = new Image(); der.src = "/ladoder.png";   derRef.current = der;
-    const pez = new Image(); pez.src = "/pez.png";       pezRef.current = pez;
+    const pez   = new Image(); pez.src   = "/pez.png";    pezRef.current   = pez;
+    const nubes = new Image(); nubes.src = "/nubes.png";  nubesRef.current = nubes;
 
     // ── Layout ────────────────────────────────────────────────────────────
     let W = 0, H = 0, hz = 0;
     let sprW = 0, sprH = 0, sprX = 0, sprY = 0;
     let rodX = 0, rodY = 0, rodLen = 0;
     let dbX  = 0, dbY  = 0;
-    let waveLines: { x: number; y: number; len: number }[] = [];
+    let skyCanvas: HTMLCanvasElement | null = null;
+    let seaCanvas: HTMLCanvasElement | null = null;
 
-    function buildWaveLines(): void {
+    function buildSkyCanvas(): void {
+      const skc = document.createElement("canvas");
+      skc.width = W; skc.height = hz;
+      const skx = skc.getContext("2d")!;
+      const g = skx.createLinearGradient(0, 0, 0, hz);
+      g.addColorStop(0,    "#5c1a6e");
+      g.addColorStop(0.30, "#b8365a");
+      g.addColorStop(0.65, "#e0602a");
+      g.addColorStop(1,    "#f5c043");
+      skx.fillStyle = g;
+      skx.fillRect(0, 0, W, hz);
+      skyCanvas = skc;
+    }
+
+    function buildSeaCanvas(): void {
+      const swc = document.createElement("canvas");
+      swc.width = W; swc.height = H - hz;
+      const swx = swc.getContext("2d")!;
+
+      function hash2(a: number, b: number): number {
+        return Math.abs(Math.sin(a * 127.1 + b * 311.7) * 43758.5453) % 1;
+      }
+
+      const g = swx.createLinearGradient(0, 0, 0, H - hz);
+      g.addColorStop(0,    "#2d7ab5");
+      g.addColorStop(0.45, "#1a5e8a");
+      g.addColorStop(1,    "#0c3858");
+      swx.fillStyle = g;
+      swx.fillRect(0, 0, W, H - hz);
+
+      const COOL: string[] = ["#5db1e5", "#3a8fc1", "#4fa8d8", "#226090", "#2d7ab5"];
+      const WARM: string[] = ["#c87040", "#d4885a", "#e09060", "#b87856", "#c8a878"];
+      const SHAPES: number[][][] = [
+        [[0,1,1,0,0],[1,1,0,0,0]],
+        [[0,0,1,1,0],[0,1,1,0,0]],
+        [[1,1,1,0,0],[0,1,1,1,0]],
+        [[0,1,0,0,0],[1,1,1,0,0]],
+        [[1,1,0,0,0],[0,0,0,0,0]],
+        [[1,1,1,1,0],[0,0,1,1,0]],
+      ];
+
+      const NUM_BANDS = 24;
       const oH = H - hz;
-      // 15 stable positions derived from index — no grid, no pattern
-      waveLines = Array.from({ length: 15 }, (_, i) => {
-        const h1 = Math.abs(Math.sin(i * 127.1) * 43758.5453) % 1;
-        const h2 = Math.abs(Math.sin(i * 311.7) * 43758.5453) % 1;
-        const h3 = Math.abs(Math.sin(i * 459.3) * 43758.5453) % 1;
-        return {
-          x:   Math.round(W * 0.04 + h1 * W * 0.92),
-          y:   Math.round(hz + h2 * oH),
-          len: Math.round(4 + h3 * 6),
-        };
-      });
+
+      for (let band = 0; band < NUM_BANDS; band++) {
+        const t    = band / (NUM_BANDS - 1);
+        const y    = Math.round(t * t * oH * 0.95);
+        const ps   = Math.max(1, Math.round(1 + t * 3));
+
+        const warmChance  = (1 - t) * 0.45 + 0.05;
+        const baseSpacing = Math.round(W / (10 + Math.floor(hash2(band, 0) * 6)));
+        let x = Math.round(hash2(band, 1) * baseSpacing);
+
+        while (x < W) {
+          const isWarm = hash2(x * 0.01 + band * 0.3, band * 0.7) < warmChance;
+          const pal    = isWarm ? WARM : COOL;
+          const cIdx   = Math.floor(hash2(x * 0.05 + band, band * 2) * pal.length);
+          const sIdx   = Math.floor(hash2(band * 3 + x * 0.07, x * 0.02 + band * 5) * SHAPES.length);
+          const shape  = SHAPES[sIdx];
+
+          swx.fillStyle = pal[cIdx];
+          for (let row = 0; row < shape.length; row++) {
+            for (let col = 0; col < shape[row].length; col++) {
+              if (!shape[row][col]) continue;
+              swx.fillRect(x + col * ps, y + row * ps, ps, ps);
+            }
+          }
+
+          x += baseSpacing + Math.round(hash2(x + band * 31, band + x * 17) * baseSpacing * 0.8);
+        }
+      }
+
+      seaCanvas = swc;
     }
 
     function applyLayout() {
@@ -145,7 +195,8 @@ export default function GameCanvas() {
       rodY   = Math.round(sprY + sprH * 0.38);
       dbX = Math.round(W * 0.87);
       dbY = Math.round(hz + H * 0.02);
-      buildWaveLines();
+      buildSkyCanvas();
+      buildSeaCanvas();
     }
 
     function resize() {
@@ -161,61 +212,20 @@ export default function GameCanvas() {
 
     // ── Draw helpers ──────────────────────────────────────────────────────
     function drawSky() {
-      // Warm sunset gradient: deep purple → hot pink → orange → gold
-      const g = ctx.createLinearGradient(0, 0, 0, hz);
-      g.addColorStop(0,    "#5c1a6e");
-      g.addColorStop(0.30, "#b8365a");
-      g.addColorStop(0.65, "#e0602a");
-      g.addColorStop(1,    "#f5c043");
-      ctx.fillStyle = g;
-      ctx.fillRect(0, 0, W, hz);
-
-      // ── Cloud text "SteadyArc" ──────────────────────────────────────────
-      const text  = "SteadyArc";
-      const CG    = 1;  // gap between pixels within a character
-      // Size to fill ~85% of screen width and ~65% of sky height
-      const CELL  = Math.max(2, Math.min(
-        Math.floor(W * 0.85 / (text.length * 5.8 + 4)),
-        Math.floor(hz * 0.65 / 8),
-      ));
-      const LSPC  = Math.max(2, Math.round(CELL * 0.55));
-      const charW = 5 * CELL + 4 * CG;
-      const charH = 7 * CELL + 6 * CG;
-      const totalW = text.length * charW + (text.length - 1) * LSPC;
-      const startX = Math.round((W - totalW) / 2);
-      const startY = Math.round((hz - charH) * 0.35);
-
-      for (let ci = 0; ci < text.length; ci++) {
-        const rows = CLOUD_FONT[text[ci]];
-        if (!rows) continue;
-        const ox = startX + ci * (charW + LSPC);
-        for (let row = 0; row < 7; row++) {
-          const bits = rows[row] ?? 0;
-          for (let col = 0; col < 5; col++) {
-            if (!(bits & (1 << (4 - col)))) continue;
-            const px = ox + col * (CELL + CG);
-            const py = startY + row * (CELL + CG);
-            // Warm lavender shadow offset
-            ctx.fillStyle = "#c882b0";
-            ctx.fillRect(px + 1, py + 1, CELL, CELL);
-            // Cloud body — warm white
-            ctx.fillStyle = "#fff4ef";
-            ctx.fillRect(px, py, CELL, CELL);
-            // Bright top highlight strip
-            if (CELL >= 4) {
-              ctx.fillStyle = "#ffffff";
-              ctx.fillRect(px + 1, py, CELL - 2, Math.max(1, Math.round(CELL * 0.38)));
-            }
-          }
-        }
+      if (skyCanvas) ctx.drawImage(skyCanvas, 0, 0);
+      const nb = nubesRef.current;
+      if (nb?.complete && nb.naturalWidth > 0) {
+        const maxH = hz - Math.round(H * 0.05) - 6;
+        const imgH = Math.min(Math.round(hz * 0.88), maxH);
+        const imgW = Math.round(imgH * (nb.naturalWidth / nb.naturalHeight));
+        const imgX = Math.round((W - imgW) / 2);
+        const imgY = Math.round(H * 0.05);
+        ctx.drawImage(nb, imgX, imgY, imgW, imgH);
       }
     }
 
     function drawOcean() {
-      ctx.fillStyle = "#2b82cb";
-      ctx.fillRect(0, hz, W, H - hz);
-      ctx.fillStyle = "#5db1e5";
-      for (const { x, y, len } of waveLines) ctx.fillRect(x, y, len, 1);
+      if (seaCanvas) ctx.drawImage(seaCanvas, 0, hz);
     }
 
     function drawSides() {
