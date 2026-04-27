@@ -11,7 +11,7 @@ const DER_WH = 642 / 1696;
 
 // pez.png sprite dimensions
 const PEZ_HW    = 469 / 642; // height/width of the sprite
-const PEZ_SCALE = 3;         // drawn width = fish.size * PEZ_SCALE
+const PEZ_SCALE = 5;         // drawn width = fish.size * PEZ_SCALE (must match DRAW_SCALE in FishManager)
 
 function pezW(size: number) { return size * PEZ_SCALE; }
 function pezH(size: number) { return pezW(size) * PEZ_HW; }
@@ -253,29 +253,31 @@ export default function GameCanvas() {
       const img = pezRef.current;
       if (!img?.complete || !img.naturalWidth) return;
 
-      const oceanH = H - hz;
-      const minY   = hz + oceanH * 0.10;
-      const maxY   = H * 0.80;
-      const depthT = Math.max(0, Math.min(1, (fish.y - minY) / (maxY - minY)));
-      const alpha  = 0.70 + depthT * 0.30;
-
-      const fw = Math.round(pezW(fish.size));
-      const fh = Math.round(pezH(fish.size));
-      const cx = Math.round(fish.x + fw / 2);
-      const cy = Math.round(fish.y + fh / 2);
+      const oceanH  = H - hz;
+      const minY    = hz + oceanH * 0.10;
+      const maxY    = H * 0.80;
+      const depthT  = Math.max(0, Math.min(1, (fish.y - minY) / (maxY - minY)));
+      const alpha   = 0.70 + depthT * 0.30;
+      const fw      = Math.round(pezW(fish.size));
+      const fh      = Math.round(pezH(fish.size));
+      const cx      = Math.round(fish.x + fw / 2);
+      // pez.png faces RIGHT — flip horizontally when moving left
+      const flipX   = fish.speed < 0;
 
       ctx.globalAlpha = alpha;
+      ctx.save();
+      ctx.translate(cx, Math.round(fish.y + fh / 2));
 
       if (fish.state === "hooked") {
-        ctx.save();
-        ctx.translate(cx, cy);
         ctx.rotate(Math.sin(t * 25) * 0.4);
-        ctx.drawImage(img, -Math.round(fw / 2), -Math.round(fh / 2), fw, fh);
-        ctx.restore();
       } else {
         const wiggle = Math.sin(t * 8 + fish.id) * 2;
-        ctx.drawImage(img, Math.round(fish.x), Math.round(fish.y + wiggle), fw, fh);
+        ctx.translate(0, wiggle);
       }
+
+      if (flipX) ctx.scale(-1, 1);
+      ctx.drawImage(img, -Math.round(fw / 2), -Math.round(fh / 2), fw, fh);
+      ctx.restore();
 
       ctx.globalAlpha = 1;
     }
